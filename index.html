@@ -1,0 +1,956 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Virtual Light Stage</title>
+    <style>
+        body {
+            margin: 0;
+            background-color: #000;
+            color: #fff;
+            font-family: Monospace;
+            font-size: 13px;
+            line-height: 24px;
+            overscroll-behavior: none;
+        }
+        
+        a {
+            color: #2983ff;
+            text-decoration: none;
+        }
+        
+        a:hover {
+            text-decoration: underline;
+        }
+        
+        button {
+            cursor: pointer;
+            text-transform: uppercase;
+        }
+        
+        #info {
+            position: absolute;
+            top: 0px;
+            width: 100%;
+            padding: 10px;
+            box-sizing: border-box;
+            text-align: center;
+            -moz-user-select: none;
+            -webkit-user-select: none;
+            -ms-user-select: none;
+            user-select: none;
+            pointer-events: none;
+            background-color: rgba(44, 44, 44, 0.5);
+            z-index: 998 !important; /* TODO Solve this in HTML */
+        }
+        
+        a, button, input, select {
+            pointer-events: auto;
+        }
+        
+        .lil-gui {
+            z-index: 999 !important; /* TODO Solve this in HTML */
+        }
+
+        /* avoid empty links */
+        .icon {
+            display: inline-block;
+            width: 20px;
+            height: 20px;
+            mask-size: contain;
+            transition: background-color 0.3s;
+        }
+        .icon[href=""] {
+            display: none;
+        }
+
+        /* Github logo */
+        .github-logo {
+            background-color: #525252;
+            mask: url('https://cdn.jsdelivr.net/npm/simple-icons@v8/icons/github.svg') no-repeat center;
+        }
+        .github-logo:hover {
+            background-color: #ffffff;
+        }
+
+        .home-logo {
+            background-color: #5b985b;
+            mask: url('https://cdn.jsdelivr.net/npm/simple-icons@v8/icons/googlehome.svg') no-repeat center;
+        }
+        .home-logo:hover {
+            background-color: #90EE90;
+        }
+
+        .pdf-logo {
+            background-color: #8a1115;
+            mask: url('https://cdn.jsdelivr.net/npm/simple-icons@v8/icons/adobeacrobatreader.svg') no-repeat center;
+        }
+        .pdf-logo:hover {
+            background-color: #EC1C24;
+        }
+
+        .arxiv-logo {
+            background-color: #530d0d;
+            mask: url('https://cdn.jsdelivr.net/npm/simple-icons@v8/icons/arxiv.svg') no-repeat center;
+        }
+        .arxiv-logo:hover {
+            background-color: #B31B1B;
+        }
+
+        .youtube-logo {
+            background-color: #770101;
+            mask: url('https://cdn.jsdelivr.net/npm/simple-icons@v8/icons/youtube.svg') no-repeat center;
+        }
+        .youtube-logo:hover {
+            background-color: #FF0000;
+        }
+        
+    </style>
+</head>
+<body>
+    <div id="info">
+        <b>By <a href="https://jingyangcarl.com" target="_blank" rel="noopener">Jing Yang</a></b><br/>
+        <small>Toggle other settings of the <i><a href="" target="_blank" rel="noopener">Virtual Light Stage</a></i> by <i style="color: lightgreen">Controls</i> on the right →</small>
+    </div>
+    <script type="importmap">
+        {
+          "imports": {
+            "three": "https://cdn.jsdelivr.net/npm/three@0.157.0/build/three.module.js",
+            "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/",
+            "three/nodes": "https://cdn.jsdelivr.net/npm/three@0.157.0/examples/jsm/nodes/Nodes.js",
+            "lil-gui": "https://cdn.jsdelivr.net/npm/lil-gui@0.19.2/dist/lil-gui.esm.min.js",
+            "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.3/build/index.module.js"
+          }
+        }
+      </script>
+    <script type="module">
+        
+        import * as THREE from 'three';
+        import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast, MeshBVHHelper } from 'three-mesh-bvh';
+        import Stats from 'three/addons/libs/stats.module.js';
+        import GUI from 'lil-gui';
+        import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+        import { FBXLoader } from 'three/addons/loaders/FBXLoader.js';
+        import WebGPU from 'three/addons/capabilities/WebGPU.js';
+        import WebGL from 'three/addons/capabilities/WebGL.js';
+        import WebGPURenderer from 'three/addons/renderers/webgpu/WebGPURenderer.js';
+        import { color, lights, normalMap, MeshPhongNodeMaterial } from 'three/nodes';
+        import { CSS2DRenderer, CSS2DObject } from 'three/addons/renderers/CSS2DRenderer.js';
+
+        function init() {
+            // Scene setup
+            scene = new THREE.Scene();
+            camera = new THREE.PerspectiveCamera(75, window.innerWidth / window.innerHeight, 0.1, 1000);
+            camera.position.z = 2.5;
+            cameraObject = new THREE.PerspectiveCamera( 75, window.innerWidth / window.innerHeight, 0.1, 1000 );
+            cameraObject.position.z = 0.6;
+            renderer = new THREE.WebGLRenderer();
+            // renderer = new WebGPURenderer();
+            renderer.setSize(window.innerWidth, window.innerHeight);
+            document.body.appendChild(renderer.domElement);
+
+            labelRenderer = new CSS2DRenderer();
+            labelRenderer.setSize(window.innerWidth, window.innerHeight);
+            labelRenderer.domElement.style.position = 'absolute';
+            labelRenderer.domElement.style.top = 0;
+            labelRenderer.domElement.style.pointerEvents = 'none'; // https://stackoverflow.com/questions/71860355/css2renderer-is-not-working-with-webgl-renderer
+            document.body.appendChild(labelRenderer.domElement);
+        }
+
+        function setupGUI() {
+            gui = new GUI({autoPlace: true, closeFolders: true});
+            gui.close();
+
+            let gui_ls = gui.addFolder('Light Stage Setting');
+            gui_ls.open();
+            gui_ls.add( args.lightstage, 'ledDensity', 1, 10, 1 ).name('Light Density').onChange(v => setupLightStage(true)).listen();
+            gui_ls.add( args.lightstage, 'radius', 1, 10, 0.1).name('Light Stage Radius').onChange(v => setupLightStage(true)).listen();
+
+            let gui_ls_lightboard = gui_ls.addFolder('Light Board');
+            // gui_ls_lightboard.open();
+            gui_ls_lightboard.add( args.lightstage.lightboard, 'show').name('Show Light Board').onChange(v => lightboards.visible = v).listen();
+            gui_ls_lightboard.add( args.lightstage.lightboard.boundary, 'show').name('Show Boundary').onChange(v => {
+                lightboards.children.forEach(lightboard => 
+                    lightboard.children.forEach(x => {
+                        if (x.name === 'boundary') x.visible = v;
+                    }));
+            }).listen();
+            gui_ls_lightboard.add(args.lightstage.lightboard.leds, 'show').name('Show LEDs').onChange(v => {
+                lightboards.children.forEach(lightboard => 
+                    lightboard.children.forEach(x => {
+                        if (x.name === 'leds') x.visible = v;
+                    }));
+            }).listen();
+            gui_ls_lightboard.add( args.lightstage.lightboard, 'radiusWhiteLED', 0.01, 0.1, 0.01).name('Light Board Radius').onChange(v => setupLightStage(true)).listen();
+
+            let gui_ls_rig = gui_ls.addFolder('Rig');
+            // gui_ls_rig.open();
+            gui_ls_rig.add( args.lightstage.rig, 'show').name('Show Rig').onChange(v => rig.visible = v).listen();
+            gui_ls_rig.add( args.lightstage.rig, 'flashSpeed', 0, 5, 0.1).name('Flash Speed').listen();
+
+            let gui_ls_patterns = gui_ls.addFolder('Patterns');
+            gui_ls_patterns.open();
+            gui_ls_patterns.add(args.lightstage.patterns, 'active', ['olat', 'warmup', 'off']).name('Patterns').onChange(v => args.lightstage.patterns.idx=0).listen();
+            gui_ls_patterns.add(args.lightstage.patterns, 'fps', 1, 60, 1).name('FPS').listen();
+            gui_ls_patterns.add(args.lightstage.patterns, 'idx').name('Pattern Index').listen().disable();
+
+            let gui_controls = gui.addFolder('Controls');
+            // gui_controls.open();
+            gui_controls.add( args.controls, 'autoRotate').name('Camera Auto Rotation').onChange(v => controls.autoRotate = v).listen();
+            gui_controls.add( args.controls, 'autoRotateSpeed', 0, 1, 0.1).name('Camera Rotate Speed').onChange(v => controls.autoRotateSpeed = v).listen();
+            gui_controls.add( args.controls, 'autoRotate_mesh').name('Mesh Auto Rotation').listen();
+            gui_controls.add( args.controls, 'autoRotate_mesh_speed', 0, 1, 0.1).name('Mesh Rotate Speed').listen();
+
+            let gui_render = gui.addFolder('Render');
+            // gui_render.open();
+            gui_render.add( args.render.rayCaster.rays, 'count', 0, args.render.rayCaster.rays.maxNum, 1).name('Ray Count').listen();
+            gui_render.add( args.render.rayCaster, 'displayHelper').name('Show BVH').listen();
+            gui_render.add( args.render.rayCaster, 'helperDepth', 1, 20, 1).name('BVH Depth').onChange(v => {
+                helper.depth = v;
+                if (helper.visible) helper.update();
+            } ).listen();
+            gui_render.add( args.render.sideRender, 'show').name('Show Side Render').onChange(v => {
+                rendererObject.domElement.style.display = v ? 'block' : 'none';
+            }).listen();
+
+            let gui_projects = gui.addFolder('Projects');
+            gui_projects.open();
+            gui_projects.add( args.projects, 'show').name('Show Projects').onChange(v => sphereLabels.visible = v).listen();
+
+            gui.add( args.controls, 'reset').name('Reset').onChange(v => onclick_btn_reset()).listen();
+            gui.add( args.controls, 'fullscreen').name('Fullscreen').listen();
+            document.body.appendChild(gui.domElement);
+        }
+
+        function setupStats() {
+            stats = new Stats();
+            document.body.appendChild(stats.dom);
+        }
+
+        function buildPoints(positions, sizes, colors) {
+
+            const vs = `
+                attribute float size;
+                attribute vec3 customColor;
+        
+                varying vec3 vColor;
+        
+                void main() {
+        
+                    vColor = customColor;
+        
+                    vec4 mvPosition = modelViewMatrix * vec4( position, 1.0 );
+        
+                    gl_PointSize = size * ( 1.0 / -mvPosition.z );
+        
+                    gl_Position = projectionMatrix * mvPosition;
+        
+                }`;
+        
+            const fs = `
+                uniform vec3 color;
+                // uniform sampler2D pointTexture;
+                uniform float alphaTest;
+        
+                varying vec3 vColor;
+        
+                void main() {
+        
+        
+                    // draw circle for each point
+                    if (distance(gl_PointCoord, vec2(0.5, 0.5)) > 0.5) discard; // square -> circle
+                    
+                    // assign color for each point
+                    gl_FragColor = vec4( vColor, 1.0 );
+                    // gl_FragColor = gl_FragColor * texture2D( pointTexture, gl_PointCoord );
+        
+                    // pass alpha test
+                    if ( gl_FragColor.a < alphaTest ) discard;
+        
+                }`;
+        
+            // define geometry and material
+            var geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(positions, 3));
+            geo.setAttribute('size', new THREE.Float32BufferAttribute(sizes, 1));
+            geo.setAttribute('customColor', new THREE.Float32BufferAttribute(colors, 3));
+            geo.attributes.customColor.needsUpdate = true;
+            var mat = new THREE.ShaderMaterial({
+                uniforms: {
+                    color: { value: new THREE.Color(colors) },
+                    alphaTest: { value: 0.9 }
+                },
+                vertexShader: vs,
+                fragmentShader: fs,
+            });
+            var particle = new THREE.Points(geo, mat);
+            return particle;
+        }
+
+        function clearScene() {
+            while(scene.children.length > 0){ 
+                scene.remove(scene.children[0]); 
+            }
+        }
+
+        // Function to create a snowflake-shaped light board
+        function createLightBoard(ledIntensities) {
+            const lightboard = new THREE.Group();
+            let leds = {
+                positions: [],
+                sizes: [],
+                colors: [],
+            }
+            let radiusBasis = args.lightstage.lightboard.radiusWhiteLED;
+            let radiusLED = args.lightstage.lightboard.leds.radius;
+
+            // get the corner points of a hexagon
+            const hexagonCornerVertices = [];
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                const x = Math.cos(angle) * radiusBasis;
+                const y = Math.sin(angle) * radiusBasis;
+                hexagonCornerVertices.push({ x, y });
+            }
+
+            // place white lights on the hexagon
+            const midPointsPerEdge = 1;
+            for (let i = 0; i < 6; i++) {
+                const start = hexagonCornerVertices[i];
+                const end = hexagonCornerVertices[(i + 1) % 6];
+            
+                // Place two points on each edge
+                for (let j = 1; j <= (midPointsPerEdge + 1); j++) {
+                    const t = j / (midPointsPerEdge + 1);
+                    const x = start.x * (1 - t) + end.x * t;
+                    const y = start.y * (1 - t) + end.y * t;
+
+                    if (args.render_mode === 'points') {
+                        leds.positions.push(x, y, 0);
+                        leds.sizes.push(radiusLED);
+                        leds.colors.push(...(ledIntensities[0].toArray()));
+                    } else {
+                        const led = new THREE.Mesh(new THREE.SphereGeometry(radiusLED, 8, 8), new THREE.MeshBasicMaterial({ color: ledIntensities[0] }));
+                        led.position.set(x, y, 0);
+                        lightboard.add(led);
+                    }
+                }
+            }
+
+            // place innser colored lights on the hexagon in the order of white, red, white, green, white, blue
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                const x = Math.cos(angle) * radiusBasis * args.lightstage.lightboard.radiusScalarColorLED;
+                const y = Math.sin(angle) * radiusBasis * args.lightstage.lightboard.radiusScalarColorLED;
+                if (args.render_mode === 'points') {
+                    let color = i % 2 === 0 ? ledIntensities[0] : ledIntensities[1+(i - 1) / 2 % 3];
+                    leds.positions.push(x, y, 0);
+                    leds.sizes.push(radiusLED);
+                    leds.colors.push(...(color.toArray()));
+                } else {
+                    const color = i % 2 === 0 ? { color: ledIntensities[0] } : { color: ledIntensities[1+(i - 1) / 2 % 3] };
+                    const led = new THREE.Mesh(new THREE.SphereGeometry(radiusLED, 8, 8), new THREE.MeshBasicMaterial(color));
+                    led.position.set(x, y, 0);
+                    lightboard.add(led);
+                }
+            }
+
+            // 6 daughter boards with 4 colored lights at the end forming a diamond
+            for (let i = 0; i < 6; i++) {
+                const angle = (i / 6) * Math.PI * 2;
+                const x = Math.cos(angle) * radiusBasis * args.lightstage.lightboard.radiusScalarDaughter;
+                const y = Math.sin(angle) * radiusBasis * args.lightstage.lightboard.radiusScalarDaughter;
+                for (let j = 0; j < 4; j++) {
+                    const color = ledIntensities[1+j];
+            
+                    // Calculate diamond offset positions using parameterized offsetDistance
+                    let offsetX = 0;
+                    let offsetY = 0;
+                    let dX = radiusBasis * args.lightstage.lightboard.radiusScalarDautherOffsetX;
+                    let dY = radiusBasis * args.lightstage.lightboard.radiusScalarDautherOffsetY;
+                    
+                    if (j === 0) { offsetX = -dX; offsetY = 0; }  // j==0, red, Down
+                    else if (j === 1) { offsetX = 0; offsetY = -dY; }  // j==1, Green, Left
+                    else if (j === 2) { offsetX = dX; offsetY = 0; }  // j==2, Blue, Top
+                    else if (j === 3) { offsetX = 0; offsetY = dY; }  // j==3, Amber, Right
+            
+                    const rotatedOffsetX = offsetX * Math.cos(angle) - offsetY * Math.sin(angle);
+                    const rotatedOffsetY = offsetX * Math.sin(angle) + offsetY * Math.cos(angle);
+                    
+                    if (args.render_mode === 'points') {
+                        leds.positions.push(x + rotatedOffsetX, y + rotatedOffsetY, 0);
+                        leds.sizes.push(radiusLED);
+                        leds.colors.push(...(color).toArray());
+                    } else {
+                        const led = new THREE.Mesh(new THREE.SphereGeometry(radiusLED, 8, 8), new THREE.MeshBasicMaterial({ color }));
+                        led.position.set(x + rotatedOffsetX, y + rotatedOffsetY, 0);
+                        lightboard.add(led);
+                    }
+                }
+            }
+            
+            if (args.render_mode === 'points') {
+                let ledsGroup = buildPoints(leds.positions, leds.sizes, leds.colors);
+                ledsGroup.visible = args.lightstage.lightboard.leds.show;
+                ledsGroup.name = 'leds';
+
+                let point_light = new THREE.PointLight(0xffffff, 1);
+                point_light.name = 'led_light';
+                point_light.power = 1700;
+                point_light.visible = false;
+                lightboard.add(point_light);
+                
+                lightboard.add(ledsGroup);
+                lightboard.userData['leds'] = {
+                    positions: leds.positions,
+                    sizes: leds.sizes,
+                    colors: leds.colors,
+                }
+            }
+
+            // draw boarder of the hexagon
+            const scalar = args.lightstage.lightboard.radiusScalarBoarder;
+            const hexagon = new THREE.LineLoop(new THREE.BufferGeometry().setFromPoints(hexagonCornerVertices.map(v => new THREE.Vector3(scalar*v.x, scalar*v.y, 0))), new THREE.LineBasicMaterial({ color: 0xffffff, linewidth: 1, transparent: true, opacity: 0.3 }));
+            hexagon.name = 'boundary';
+            hexagon.visible = args.lightstage.lightboard.boundary.show;
+            lightboard.add(hexagon);
+
+            return lightboard;
+        }
+
+        function setupLightStage(reset=false) {
+
+            if (reset) {
+                // remove all light boards and rig
+                scene.remove(lightboards);
+                scene.remove(rig);
+                args.lightstage.patterns.idx = 0 // reset pattern index
+            }
+
+            function getVertices(mesh) {
+                const position = geometry.attributes.position;
+                const vertices = [];
+                const uniquePositions = new Set();
+                
+                for (let i = 0; i < geometry.attributes.position.count; i++) {
+                    let vertex = new THREE.Vector3().fromBufferAttribute(geometry.attributes.position, i);
+                    let vertexKey = `${vertex.x},${vertex.y},${vertex.z}`;
+                    if (!uniquePositions.has(vertexKey)) {
+                        uniquePositions.add(vertexKey);
+                        vertices.push(vertex);
+                    }
+                }
+               
+               return vertices;
+            }
+
+            // Generate light board positions
+            let geometry = new THREE.IcosahedronGeometry(args.lightstage.radius, args.lightstage.ledDensity-1);
+            const positions = getVertices(geometry);
+
+            // Convert to polar coordinates and sort
+            positions.sort((a, b) => {
+                if (Math.abs(a.z - b.z) > 0.01) {
+                    return b.z - a.z; // Sort by z-coordinate in descending order if z-coordinates are not equal
+                } else {
+                    // If z-coordinates are equal, sort by angle in the x-y plane
+                    const angleA = Math.atan2(a.x, a.y);
+                    const angleB = Math.atan2(b.x, b.y);
+                    return angleB - angleA;
+                }
+            });
+            
+
+            // Add light boards to the scene
+            lightboards = new THREE.Group();
+            lightboards.name = 'lightboards';
+            positions.forEach(pos => {
+                let ledIntensities = Object.entries(args.lightstage.lightboard.leds.colors).map(([k, v]) => (new THREE.Color(v)));
+                const lightboard = createLightBoard(ledIntensities);
+                lightboard.name = 'lightboard';
+                lightboard.visible = args.lightstage.lightboard.show;
+                lightboard.position.copy(pos);
+                lightboard.lookAt(0, 0, 0);
+                lightboards.add(lightboard);
+            });
+            scene.add(lightboards);
+
+            // light stage rig
+            var geo = new THREE.EdgesGeometry( geometry ); // or rigGeometry( geometry )
+            var mat = new THREE.LineBasicMaterial( { color: 0xffffff, linewidth: 2, transparent: true, opacity: args.lightstage.rig.opacity} );
+            rig = new THREE.LineSegments( geo, mat );
+            rig.name = 'rig';
+            rig.visible = args.lightstage.rig.show;
+            scene.add( rig );
+
+        }
+
+        function setupBunny() {
+            // Load bunny
+            const loader = new FBXLoader();
+            loader.load( 'https://raw.githubusercontent.com/mrdoob/three.js/master/examples/models/fbx/stanford-bunny.fbx', object => {
+
+                mesh = object.children[ 0 ];
+
+                const geometry = mesh.geometry;
+                geometry.translate( 0, 0.5 / 0.0075, 0 );
+                geometry.scale( 0.1, 0.1, 0.1 );
+                geometry.computeBoundsTree();
+                bvh = geometry.boundsTree;
+
+                if ( ! args.render.rayCaster.useBVH ) {
+
+                    geometry.boundsTree = null;
+
+                }
+
+                scene.add( mesh );
+                mesh.scale.setScalar( 0.0075 );
+
+                helper = new MeshBVHHelper( mesh );
+                helper.color.set( 'lightgreen' );
+                helper.visible = args.render.rayCaster.displayHelper;
+                scene.add( helper );
+
+            } );
+        }
+
+        function setupRayCaster() {
+            // raycast visualizations
+            const lineGeometry = new THREE.BufferGeometry();
+            lineGeometry.setAttribute( 'position', new THREE.BufferAttribute( new Float32Array( args.render.rayCaster.rays.maxNum * 2 * 3 ), 3 ) );
+            lineSegments = new THREE.LineSegments( lineGeometry, new THREE.LineBasicMaterial( {
+                color: args.render.rayCaster.rays.color,
+                transparent: true,
+                opacity: 0.25,
+                depthWrite: false
+            } ) );
+
+            sphereInstance = new THREE.InstancedMesh(
+                new THREE.SphereGeometry(),
+                new THREE.MeshBasicMaterial( { color: args.render.rayCaster.rays.color } ),
+                2 * args.render.rayCaster.rays.maxNum
+            );
+            sphereInstance.instanceMatrix.setUsage( THREE.DynamicDrawUsage );
+            sphereInstance.count = 0;
+
+            scene.add( sphereInstance, lineSegments );
+            
+            initRays();
+            initLabels();
+        }
+
+        function initLabels() {
+
+            // add labels
+            sphereLabels = new THREE.Group();
+            for (let i = 0; i < args.projects.items.length; i++) {
+
+                let project = args.projects.items[i];
+                var div = document.createElement('div');
+                div.innerHTML = `<i>${project.conf}<i><br><i><b>${project.name}</b><i><br> \
+                    <a class="icon home-logo" href="${project.page}" target="_blank"></a> \
+                    <a class="icon github-logo" href="${project.github}" target="_blank"></a> \
+                    <a class="icon pdf-logo" href="${project.pdf}" target="_blank"></a> \
+                    <a class="icon arxiv-logo" href="${project.arxiv}" target="_blank"></a> \
+                    <a class="icon youtube-logo" href="${project.youtube}" target="_blank"></a>`;
+                div.style.color = 'white';
+                var label = new CSS2DObject(div);
+                sphereLabels.add(label);
+            }
+
+            scene.add( sphereLabels );
+        }
+
+        function initRays() {
+
+            const position = new THREE.Vector3();
+            const quaternion = new THREE.Quaternion();
+            const scale = new THREE.Vector3( 1, 1, 1 );
+            const matrix = new THREE.Matrix4();
+
+            for ( let i = 0; i < args.render.rayCaster.rays.maxNum * 2; i ++ ) {
+
+                position.randomDirection().multiplyScalar( args.lightstage.radius * args.render.rayCaster.radiusScalar );
+                matrix.compose( position, quaternion, scale );
+                sphereInstance.setMatrixAt( i, matrix );
+
+            }
+
+        }
+
+        function updateRays() {
+
+            if ( ! mesh ) return;
+
+            _raycaster.firstHitOnly = args.render.rayCaster.firstHitOnly;
+            const rayCount = args.render.rayCaster.rays.count;
+
+            let lineNum = 0;
+            for ( let i = 0; i < rayCount; i ++ ) {
+
+                // get the current ray origin
+                sphereInstance.getMatrixAt( i * 2, _matrix );
+                _matrix.decompose( _position, _quaternion, _scale );
+
+                // rotate it about the origin
+                const offset = 1e-5 * window.performance.now();
+                _axis.set(
+                    Math.sin( i * 100 + offset ),
+                    Math.cos( - i * 10 + offset ),
+                    Math.sin( i * 1 + offset ),
+                ).normalize();
+                _position.applyAxisAngle( _axis, 0.0003 );
+
+                // update the position
+                _scale.setScalar( args.render.rayCaster.rays.sphereScale );
+                _matrix.compose( _position, _quaternion, _scale );
+                sphereInstance.setMatrixAt( i * 2, _matrix );
+
+                // update label position
+                if (i < sphereLabels.children.length) {
+                    sphereLabels.children[i].visible = args.projects.show;
+                    sphereLabels.children[i].position.copy(_position);
+                }
+
+                // raycast
+                _raycaster.ray.origin.copy( _position );
+                _raycaster.ray.direction.copy( _position ).multiplyScalar( - 1 ).normalize();
+
+                // update hits points and lines
+                const hits = _raycaster.intersectObject( mesh );
+                if ( hits.length !== 0 ) {
+
+                    const hit = hits[ 0 ];
+                    const point = hit.point;
+                    _scale.setScalar( 0.01 );
+                    _matrix.compose( point, _quaternion, _scale );
+                    sphereInstance.setMatrixAt( i * 2 + 1, _matrix );
+
+                    lineSegments.geometry.attributes.position.setXYZ( lineNum ++, _position.x, _position.y, _position.z );
+                    lineSegments.geometry.attributes.position.setXYZ( lineNum ++, point.x, point.y, point.z );
+
+                } else {
+
+                    sphereInstance.setMatrixAt( i * 2 + 1, _matrix );
+                    lineSegments.geometry.attributes.position.setXYZ( lineNum ++, _position.x, _position.y, _position.z );
+                    lineSegments.geometry.attributes.position.setXYZ( lineNum ++, 0, 0, 0 );
+
+                }
+
+            }
+
+            sphereInstance.count = rayCount * 2;
+            sphereInstance.instanceMatrix.needsUpdate = true;
+
+            lineSegments.geometry.setDrawRange( 0, lineNum );
+            lineSegments.geometry.attributes.position.needsUpdate = true;
+
+        }
+
+        function updatePattern() {
+            let off = 0.1;
+            let curr = new Date().getTime();
+            if (args.lightstage.patterns.active === 'olat') {
+                
+                // reset all lights to off
+                if (args.lightstage.patterns.idx == 0) {
+                    lightboards.children.forEach((lightboard, i) => {
+                        let leds = lightboard.getObjectByName('leds').geometry.attributes.customColor;
+                        let leds_init = lightboard.userData['leds'].colors;
+                        for (let j = 0; j < leds.count; j++) {
+                            leds.setXYZ(j, off*leds_init[3*j], off*leds_init[3*j+1], off*leds_init[3*j+2]);
+                        }
+                        leds.needsUpdate = true;
+                    });
+                }
+
+                if (curr - args.lightstage.patterns.last_update > (1000/args.lightstage.patterns.fps)) {
+                    args.lightstage.patterns.last_update = curr;
+
+                    let n_all_white = args.lightstage.patterns.fps; // 1 second all white
+                    let n_all_off = args.lightstage.patterns.fps / 2; // 0.5 second all off
+                    
+                    // update lights
+                    lightboards.children.forEach((lightboard, i) => {
+                        let leds = lightboard.getObjectByName('leds').geometry.attributes.customColor;
+                        let leds_init = lightboard.userData['leds'].colors;
+                        let led_light = lightboard.getObjectByName('led_light');
+                        if (args.lightstage.patterns.idx < n_all_white) {
+                            // swith on all
+                            for (let j = 0; j < leds.count; j++) {
+                                leds.setXYZ(j, leds_init[3*j], leds_init[3*j+1], leds_init[3*j+2]);
+                                led_light.visible = true;
+                            }
+                        } else if (args.lightstage.patterns.idx < (n_all_white + n_all_off)) {
+                            // switch off all
+                            for (let j = 0; j < leds.count; j++) {
+                                leds.setXYZ(j, off*leds_init[3*j], off*leds_init[3*j+1], off*leds_init[3*j+2]);
+                                led_light.visible = false;
+                            }
+                        } else {
+                            // olat pattern
+
+                            // switch on the current light board i
+                            if (i+(n_all_white + n_all_off) == args.lightstage.patterns.idx) {
+                                for (let j = 0; j < leds.count; j++) {
+                                    if (leds.getX(j)===leds.getY(j) && leds.getY(j)===leds.getZ(j)) {
+                                        leds.setXYZ(j, leds_init[3*j], leds_init[3*j+1], leds_init[3*j+2]);
+                                        led_light.visible = true;
+                                    } else {
+                                        leds.setXYZ(j, off*leds_init[3*j], off*leds_init[3*j+1], off*leds_init[3*j+2]);
+                                    }
+                                }
+                            } else {
+                                // switch all other white LEDs off
+                                for (let j = 0; j < leds.count; j++) {
+                                    if (leds.getX(j)===leds.getY(j) && leds.getY(j)===leds.getZ(j)) {
+                                        leds.setXYZ(j, off*leds_init[3*j], off*leds_init[3*j+1], off*leds_init[3*j+2]);
+                                        led_light.visible = false;
+                                    }
+                                }
+                            }
+                            
+                        }
+                        leds.needsUpdate = true;
+                    });
+                    args.lightstage.patterns.idx = (args.lightstage.patterns.idx+1) % (lightboards.children.length+(n_all_white + n_all_off));
+                }
+            } else if (args.lightstage.patterns.active == 'warmup') {
+                if (args.lightstage.patterns.idx >= 0) {
+                    lightboards.children.forEach((lightboard, i) => {
+                        let leds = lightboard.getObjectByName('leds').geometry.attributes.customColor;
+                        let leds_init = lightboard.userData['leds'].colors;
+                        let led_light = lightboard.getObjectByName('led_light');
+                        for (let j = 0; j < leds.count; j++) {
+                            leds.setXYZ(j, leds_init[3*j], leds_init[3*j+1], leds_init[3*j+2]);
+                            led_light.visible = true;
+                        }
+                        leds.needsUpdate = true;
+                    });
+                    args.lightstage.patterns.idx = -1; // set this to static, other dynamic patterns will automatically make this positive
+                }
+            } else if (args.lightstage.patterns.active == 'off') {
+                if (args.lightstage.patterns.idx >= 0) {
+                    lightboards.children.forEach((lightboard, i) => {
+                        let leds = lightboard.getObjectByName('leds').geometry.attributes.customColor;
+                        let leds_init = lightboard.userData['leds'].colors;
+                        let led_light = lightboard.getObjectByName('led_light');
+                        for (let j = 0; j < leds.count; j++) {
+                            leds.setXYZ(j, off*leds_init[3*j], off*leds_init[3*j+1], off*leds_init[3*j+2]);
+                            led_light.visible = false;
+                        }
+                        leds.needsUpdate = true;
+                    });
+                    args.lightstage.patterns.idx = -1; // set this to static, other dynamic patterns will automatically make this positive
+                }
+            }
+        }
+
+        function setupOrbitControls() {
+            controls = new OrbitControls(camera, renderer.domElement);
+            controls.enableDamping = args.controls.enableDamping; // Enable inertia
+            controls.dampingFactor = args.controls.dampingFactor;
+            controls.autoRotate = args.controls.autoRotate;
+            controls.autoRotateSpeed = args.controls.autoRotateSpeed;
+        }
+
+        // Animation loop
+        function animate() {
+            render();
+            stats.update();
+            controls.update();
+        }
+
+        function render() {
+
+            // main scene
+            requestAnimationFrame(animate);
+            renderer.setClearColor( 0x000000, 1 );
+            renderer.setViewport( 0, 0, window.innerWidth, window.innerHeight );
+            renderer.render(scene, camera);
+            labelRenderer.render( scene, camera );
+
+            // updates
+            if (rig) {
+                rig.visible = args.lightstage.rig.show;
+                rig.material.opacity = args.lightstage.rig.opacity * (1 + Math.sin(new Date().getTime() * .0025 * args.lightstage.rig.flashSpeed)); // change opacity of the rig
+            }
+        
+            if (helper) {
+                helper.visible = args.render.rayCaster.displayHelper;
+            }
+
+            if (mesh && args.controls.autoRotate_mesh) {
+                mesh.rotation.y += args.controls.autoRotate_mesh_speed / 10;
+                mesh.updateMatrixWorld();
+            }
+
+            if (sphereInstance) {
+                updateRays();
+            }
+
+            updatePattern();
+
+            // inset scene
+            // debugger;
+            if (args.render.sideRender.show) {
+                renderer.setClearColor( 0x000000, 2 );
+                renderer.clearDepth(); // important!
+                renderer.setScissorTest( true );
+                renderer.setScissor( 20, 20, insetWidth, insetHeight);
+                renderer.setViewport( 20, 20, insetWidth, insetHeight);
+                renderer.render( scene, cameraObject );
+                renderer.setScissorTest( false );
+            }
+        }
+
+        function onclick_btn_reset() {
+            // copy value of args_init to args recursively
+            let sync = (a, b) => {
+                for (let k in a) {
+                    if (typeof a[k] === 'object') {
+                        sync(a[k], b[k]);
+                    } else {
+                        a[k] = b[k];
+                    }
+                }
+            }
+            sync(args, args_init);
+    
+            // reset all args recursively but not the active property
+            setupLightStage(true);
+            setupOrbitControls();
+        }
+
+        function onWindowResize(){
+            
+            camera.aspect = window.innerWidth / window.innerHeight;
+            camera.updateProjectionMatrix();
+
+            renderer.setSize( window.innerWidth, window.innerHeight );
+            labelRenderer.setSize( window.innerWidth, window.innerHeight );
+
+            insetWidth = window.innerHeight / args.render.sideRender.insetScalar; // square
+            insetHeight = window.innerHeight / args.render.sideRender.insetScalar;
+            cameraObject.aspect = insetWidth / insetHeight;
+            cameraObject.updateProjectionMatrix();
+        }
+
+        
+        // Add the extension functions
+        THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+        THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+        THREE.Mesh.prototype.raycast = acceleratedRaycast;
+
+        // Global variables
+        let scene, camera, cameraObject, renderer, labelRenderer, gui, stats;
+        let rig, lightboards;
+        let controls;
+        let mesh, helper, bvh;
+        let sphereInstance, lineSegments, sphereLabels;
+        let insetWidth, insetHeight;
+
+        // reusable variables
+        const _raycaster = new THREE.Raycaster();
+        const _position = new THREE.Vector3();
+        const _quaternion = new THREE.Quaternion();
+        const _scale = new THREE.Vector3( 1, 1, 1 );
+        const _matrix = new THREE.Matrix4();
+        const _axis = new THREE.Vector3();
+
+        let render_mode = 'points';
+        const args_init = {
+            render_mode: render_mode,
+            lightstage: {
+                radius: 1.5,
+                ledDensity: 5,
+                lightboard: {
+                    show: true,
+                    radiusWhiteLED: 0.05,
+                    radiusScalarColorLED: 0.5, // the radius scalar * radiusWhiteLED is the radius of the hexogon of the color LED, which is fixed scalar due to equilateral triangle,
+                    radiusScalarBoarder: 1.5, // the radius scalar * radiusWhiteLED is the radius of the hexogon of main board, fixed scalar due to equilateral triangle,
+                    radiusScalarDaughter: 2.1, // the radius scalar * radiusWhiteLED is the radius of the hexogon of daughter board
+                    radiusScalarDautherOffsetX: 0.3, // Parameterized offset distance towards normal direction
+                    radiusScalarDautherOffsetY: 0.15,// Parameterized offset distance towards tangent direction
+                    boundary: {
+                        show: true,
+                    },
+                    leds: {
+                        show: true,
+                        radius: render_mode === 'points' ? 5 : 0.01,
+                        colors: {
+                            white: 0xffffff,
+                            red: 0xff0000,
+                            green: 0x00ff00,
+                            blue: 0x0000ff,
+                            amber: 0xffa500,
+                        }
+                    }
+                },
+                rig: {
+                    show: false,
+                    opacity: 0.25,
+                    flashSpeed: 0,  // Speed of the light stage rig flashing
+                },
+                patterns: {
+                    active: 'olat',
+                    idx: 0,
+                    last_update: new Date().getTime(),
+                    fps: 10,
+                }
+            },
+            controls: {
+                enableDamping: true,
+                dampingFactor: 0.05,
+                autoRotate: true,
+                autoRotateSpeed: 0.1,
+                autoRotate_mesh: true,
+                autoRotate_mesh_speed: 0.01,
+                reset: function() {},
+                fullscreen: function() {},
+            },
+            render: {
+                rayCaster: {
+                    radiusScalar: 1, // the radius scalar * lightstage.radius is the radius rays
+                    rays: {
+                        count: 20,
+                        sphereScale: 0.01,
+                        color: 0x444444,
+                        maxNum: 3000,
+                    },
+                    firstHitOnly: true,
+                    useBVH: true,
+                    displayHelper: true,
+                    helperDepth: 10,
+                },
+                sideRender: {
+                    show: true,
+                    insetScalar: 4,
+                }
+            },
+            projects: {
+                show: false,
+                items: [],
+            }
+        }
+        let args = JSON.parse(JSON.stringify(args_init));
+        args.controls.reset = function(){};
+        args.controls.fullscreen = function(){window.open('https://virtualLightStage.github.io/');};
+
+        // Setup light stage
+        init();
+        setupGUI();
+        setupStats();
+        setupLightStage();
+        setupBunny();
+        setupRayCaster();
+        setupOrbitControls();
+        animate();
+
+        window.addEventListener( 'resize', onWindowResize, false );
+        onWindowResize();
+    </script>
+</body>
+</html>
